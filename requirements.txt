@@ -1,0 +1,25 @@
+# Core
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+
+# Tabular formats
+openpyxl>=3.1        # .xlsx / .xlsm
+xlrd>=2.0            # legacy .xls (read-only)
+pyarrow>=12.0        # parquet / feather
+fastparquet>=2023.1  # optional parquet engine
+
+# Scientific formats
+xarray>=2023.1
+netCDF4>=1.6
+h5py>=3.8
+
+# Visualization (figures)
+matplotlib>=3.7
+
+# Notebook tooling
+nbformat>=5.7
+ipykernel>=6.20      # to run the notebook locally
+
+# Optional: richer country-name resolution
+pycountry>=22.3

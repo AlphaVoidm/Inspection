@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Audit outputs (generated artifacts — keep out of Git)
+data_audit_output/
+audit_output/
+*.audit_tmp/
+
+# Notebooks / IDE
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store
+
+# Test scratch
+/tmp_test_data/
