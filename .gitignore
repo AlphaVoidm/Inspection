@@ -1,0 +1,13 @@
+__pycache__/
+.ipynb_checkpoints/
+.venv/
+*.pyc
+
+# keep raw datasets out of git - point DATA_PATH at them locally
+data/
+*.nc
+*.parquet
+*.feather
+*.xlsx
+*.xls
+!examples/sample_energy_panel.csv
