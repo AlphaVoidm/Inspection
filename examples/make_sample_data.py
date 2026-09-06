@@ -99,3 +99,36 @@ df = pd.concat([df, extra], ignore_index=True)
 df = df.sample(frac=1.0, random_state=8).reset_index(drop=True)   # unsorted on purpose
 df.to_csv("examples/sample_energy_panel.csv", index=False)
 print("Wrote examples/sample_energy_panel.csv", df.shape)
+
+
+# ---------------------------------------------------------------------------
+# A small multi-site tree so batch mode can be tried immediately:
+#   examples/sites/<site>/<files>  ->  reports/<site>/report.html + summary.md
+# ---------------------------------------------------------------------------
+import pathlib
+
+base = df[df["country_name"].isin(["Germany", "France", "Spain"])].copy()
+
+site_a = pathlib.Path("examples/sites/site_alpha")
+site_a.mkdir(parents=True, exist_ok=True)
+early = base[base["year"] <= 2019]
+late = base[base["year"] >= 2020]
+early.to_csv(site_a / "demand_2015_2019.csv", index=False)
+late.to_csv(site_a / "demand_2020_2023.csv", index=False)
+
+site_b = pathlib.Path("examples/sites/site_beta")
+site_b.mkdir(parents=True, exist_ok=True)
+# same site, a different layout: fewer columns and a renamed country field
+weather = base[["country_name", "date", "temperature_c", "latitude", "longitude"]].rename(
+    columns={"country_name": "country"})
+weather.to_csv(site_b / "weather_monthly.csv", index=False)
+# a tiny station list with no time dimension at all
+pd.DataFrame({
+    "station_id": ["ST-001", "ST-002", "ST-003", "ST-004"],
+    "country": ["Germany", "France", "Spain", "Spain"],
+    "latitude": [51.2, 46.2, 40.5, 99.9],       # one invalid latitude
+    "longitude": [10.4, 2.2, -3.7, -3.7],
+    "elevation_m": [120, 340, 660, np.nan],
+}).to_csv(site_b / "stations.csv", index=False)
+
+print("Wrote examples/sites/ demo tree for batch mode")

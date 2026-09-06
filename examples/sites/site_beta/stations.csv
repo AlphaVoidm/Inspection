@@ -1,0 +1,5 @@
+station_id,country,latitude,longitude,elevation_m
+ST-001,Germany,51.2,10.4,120.0
+ST-002,France,46.2,2.2,340.0
+ST-003,Spain,40.5,-3.7,660.0
+ST-004,Spain,99.9,-3.7,
