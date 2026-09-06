@@ -8,9 +8,9 @@ A single, self-contained Jupyter notebook for auditing a dataset **before** any 
 | File | Purpose |
 | --- | --- |
 | `dataset_inspection.ipynb` | The audit notebook — the thing you run |
-| `batch_audit.py` | Batch runner: audits every file in every site folder and saves one report per folder |
+| `batch_audit.py` | Batch runner: audits every file of every source, one report per dataset folder |
 | `examples/sample_energy_panel.csv` | Small demo panel with deliberate defects, so the notebook has something to find |
-| `examples/sites/` | Demo multi-site tree (two site folders) for trying batch mode |
+| `examples/sites/` | Demo multi-source tree for trying batch mode without real data |
 | `examples/make_sample_data.py` | Script that regenerates the demo files |
 | `requirements.txt` | Minimal dependencies |
 
@@ -18,71 +18,97 @@ A single, self-contained Jupyter notebook for auditing a dataset **before** any 
 
 ```bash
 pip install -r requirements.txt
-jupyter lab dataset_inspection.ipynb
+jupyter lab dataset_inspection.ipynb      # then: Run All
 ```
 
-Set `DATA_PATH` in the configuration cell (section 1) and run all cells top to bottom:
+Running it top to bottom does everything: it inventories the source folders, audits one file in
+detail (`DATA_PATH = "auto"` picks the first file of the inventory), and then audits **every** file and
+saves one report per dataset folder. To inspect one specific file interactively, name it instead:
 
 ```python
-DATA_PATH = "examples/sample_energy_panel.csv"
+DATA_PATH = "OWID/owid-energy-data.csv"
+RUN_BATCH = False        # skip the full batch while working on a single file
 ```
 
 Supported formats: `.csv`, `.tsv`, `.txt`, `.xlsx`/`.xls`, `.parquet`, `.feather`, `.json`/`.jsonl`,
 and `.nc`/NetCDF (opened with `xarray`; a derived flat table is used for the tabular checks while the
 original `xarray.Dataset` stays available as `ds`).
 
-## Batch mode — one report per site folder
+## Your data sources
 
-When your data is organised as **one folder per site / source**, each holding several files:
+The notebook is pre-configured with the source folders of this project (configuration cell, section 1):
 
-```text
-data/
-  site_alpha/demand_2015_2019.csv
-  site_alpha/demand_2020_2023.csv
-  site_beta/weather_monthly.csv
-  site_beta/stations.csv
+```python
+PROJECT_ROOT = "."
+DATA_SOURCES = ["CDS", "EIA", "Ember", "ENTSOE", "IEA", "IRENASTAT", "OWID", "WorldBank"]
 ```
 
-run either the last cell of the notebook (section 25, it picks up `DATA_ROOT` automatically) or:
+Section 2 walks them and builds a **file inventory** — every file, its size, and whether it will be
+audited or skipped and why. Skipped by design:
+
+| Skipped | Why |
+| --- | --- |
+| `dataaudit/`, `data_audit_output/`, `scripts/`, `tests/`, `__pycache__/`, `reports/`, `examples/` | code, caches, previous results |
+| `*.zip` (`WDI_CSV.zip`, `58df30c3….zip`) | archives — extract them; the extracted folder is audited |
+| `How to download.txt`, `download_links.csv` | documentation and link lists, not data |
+| `notebook.ipynb` inside `CDS/…` | not a data format |
+
+The inventory also flags **byte-identical files**, which is how re-downloads such as
+`inventory_of_transmission_2023 (1).csv` and `IEA-MethaneEmissionsComparison-World (1).csv` surface.
+
+Loading is adapted to what is actually in these folders:
+
+- **Delimiter sniffing** — ENTSO-E exports are `;` separated, others `,`; the file decides.
+- **EIA bulk `.txt`** (`EIA/ELEC/ELEC.txt`) is read as line-delimited JSON, capped at `JSON_LINES_ROWS`.
+- **Excel workbooks** print their sheet names; only `EXCEL_SHEET` is audited (says so in the output).
+- **Very large files** (> `LARGE_FILE_MB`, e.g. `WDICSV.csv`) are read partially and every report marks
+  the audit **PARTIAL READ**, so a truncated audit is never mistaken for a complete one.
+- **NetCDF** (`CDS/*.nc`) is opened with `xarray`; grid cells are treated as separate series.
+
+## Batch mode — one report per dataset folder
+
+Run the notebook top to bottom (section 25 launches it automatically when the source folders exist), or:
 
 ```bash
-python batch_audit.py data --out reports
-python batch_audit.py examples/sites --out reports    # try it on the bundled demo
-python batch_audit.py data --site site_beta           # one folder only
+python batch_audit.py                              # every source found next to the notebook
+python batch_audit.py --sources ENTSOE OWID        # only these sources
+python batch_audit.py --sources IRENASTAT --limit 2   # quick smoke test, 2 files per folder
+python batch_audit.py examples/sites               # the bundled demo tree
 ```
 
-The whole notebook is executed once per data file and the results are saved **per folder**:
+The whole notebook runs once per file, and results are grouped exactly like your folders:
 
 ```text
 reports/
-  overview.md                    all site folders side by side
-  site_alpha/
-    report.html                  every output of every cell, for every file in the folder
-    summary.md                   file table, schema comparison, scorecard + final audit per file
-    audits/demand_2015_2019.json machine-readable summary (one per file)
+  overview.md                                  all sources side by side
+  00_file_inventory.csv                        every file found, audited or skipped, and why
+  00_duplicate_files.csv                       byte-identical downloads
+  ENTSOE/index.md                              all ENTSO-E dataset folders side by side
+  ENTSOE/MonthlyDomesticValues/
+    report.html                                every cell output for all 10 files in that folder
+    summary.md                                 file table, schema comparison, audit per file
+    audits/monthly_domestic_values_2019.json   machine-readable summary
+  OWID/report.html, OWID/summary.md            files sitting directly in a source folder
 ```
 
-- **`report.html`** is the evidence: for each file, a header card with the key numbers, the scorecard,
-  the final audit, and then the complete notebook output — every table, plot and printed line, in
-  notebook order, with a table of contents at the top.
-- **`summary.md`** is the quick read: one row per file (rows, columns, missing %, duplicates, entities,
-  period, frequency, problem count), a **schema comparison** across the files of that folder (which
-  layouts exist, which columns are missing from some files, which columns are stored with different
-  dtypes in different files), the **problems that recur across files**, and then each file's scorecard
-  and final audit text.
-- A file whose audit hits an error does not stop the batch: the traceback is kept in `report.html` and
-  the file is listed under "Files that did not run cleanly".
+- **`report.html`** — the evidence: per file a header card, the scorecard, the final audit, then the
+  complete notebook output (every table, plot and printed line), with a table of contents.
+- **`summary.md`** — the quick read: one row per file (rows, cols, missing %, duplicates, entities,
+  period, frequency, problems), the **schema comparison across the files of that folder** (which
+  layouts exist, which columns are missing from some years, which columns changed dtype between
+  downloads), **problems that recur across files**, and each file's scorecard and final audit.
+- **`index.md` / `overview.md`** — dataset folders per source, and sources side by side.
+- A file whose audit errors does not stop the batch: the traceback stays in `report.html` and the file
+  is listed under "Files that did not run cleanly".
 
-Reports are written locally and are excluded from git (`reports/` is in `.gitignore`).
-Expect roughly 0.5–1 MB of HTML per audited file, since the plots are embedded.
-
-Running the notebook on a single file (no `data/` folder) still saves
-`reports/<filename>_audit.txt` with the final audit and scorecard.
+Runtime is a few seconds per file plus load time (≈90 s for 70 small files), and reports run roughly
+0.5–0.7 MB of HTML per file. Set `RUN_BATCH = False` in the configuration cell to skip the batch while
+working interactively. Reports are written locally and gitignored.
 
 ## What it checks
 
-1. Imports & configuration
-2. Load dataset (file type, shape, head/tail, NetCDF summary)
+1. Imports & configuration (sources, skip rules, large-file limits)
+2. Dataset inventory + load (file inventory, duplicate files, then the selected file)
 3. Dataset structure (dtypes, memory, per-column overview, NetCDF dims/coords/attrs)
 4. Important variables (keyword scan — name-based hint only)
 5. Missing data audit (per column, overall, severity bands, bar chart)
@@ -105,7 +131,7 @@ Running the notebook on a single file (no `data/` folder) still saves
 22. Coverage summary
 23. Data quality scorecard (status + evidence per dimension)
 24. Final dataset audit (problems, strengths, relevance; recommendation left blank)
-25. Save the report / batch mode (text + JSON per file, one report per site folder)
+25. Save the report / batch mode (text + JSON per file, one report per dataset folder)
 
 ## Ground rules the notebook follows
 
