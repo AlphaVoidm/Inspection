@@ -473,7 +473,7 @@ def main():
             datasets.setdefault(record["dataset"], []).append(record)
 
         dataset_results = {}
-        for dataset, dataset_records in datasets.items():
+        for folder_no, (dataset, dataset_records) in enumerate(datasets.items(), start=1):
             if args.limit:
                 dataset_records = dataset_records[:args.limit]
             rel_dir = "." if dataset == "." else "/".join(safe_name(p) for p in Path(dataset).parts)
@@ -481,7 +481,10 @@ def main():
             audits_dir = out_dir / "audits"
             audits_dir.mkdir(parents=True, exist_ok=True)
             label = source if dataset == "." else f"{source} / {dataset}"
-            print(f"  [{label}]")
+            # One folder at a time, and one file at a time inside it: each file is audited in its
+            # own kernel process, so its memory is released before the next file is opened.
+            print(f"  [folder {folder_no}/{len(datasets)}] {label} "
+                  f"- {len(dataset_records)} file(s)")
 
             if args.skip_existing and (out_dir / "report.html").exists():
                 print("    already reported - skipped (--skip-existing)")

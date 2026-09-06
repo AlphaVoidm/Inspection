@@ -63,6 +63,8 @@ Loading is adapted to what is actually in these folders:
 - **Excel workbooks** print their sheet names; only `EXCEL_SHEET` is audited (says so in the output).
 - **Very large files** (> `LARGE_FILE_MB`, e.g. `WDICSV.csv`) are read partially and every report marks
   the audit **PARTIAL READ**, so a truncated audit is never mistaken for a complete one.
+- The configuration cell prints a `Notebook version` line. If a run of yours dies inside
+  `ds.to_dataframe()`, the copy being executed predates the fix below — pull this notebook again.
 - **NetCDF** (`CDS/*.nc`) is opened lazily with `xarray`. A grid is **never** flattened whole:
   `1039 time x 721 lat x 1440 lon` is 1.08 billion rows (that is the `MemoryError: unable to allocate
   16.1 GiB` you get from `to_dataframe()`). Above `NETCDF_MAX_CELLS` the flat table is built from a
