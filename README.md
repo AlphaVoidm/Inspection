@@ -63,7 +63,15 @@ Loading is adapted to what is actually in these folders:
 - **Excel workbooks** print their sheet names; only `EXCEL_SHEET` is audited (says so in the output).
 - **Very large files** (> `LARGE_FILE_MB`, e.g. `WDICSV.csv`) are read partially and every report marks
   the audit **PARTIAL READ**, so a truncated audit is never mistaken for a complete one.
-- **NetCDF** (`CDS/*.nc`) is opened with `xarray`; grid cells are treated as separate series.
+- **NetCDF** (`CDS/*.nc`) is opened lazily with `xarray`. A grid is **never** flattened whole:
+  `1039 time x 721 lat x 1440 lon` is 1.08 billion rows (that is the `MemoryError: unable to allocate
+  16.1 GiB` you get from `to_dataframe()`). Above `NETCDF_MAX_CELLS` the flat table is built from a
+  strided sample — **spatial dimensions are thinned first so the time axis stays complete** — and text
+  coordinates such as ERA5's `expver` are kept out of the table, because they expand to one
+  4-character string per grid point. For the file above that means every 32nd latitude and every 64th
+  longitude: 549,631 rows, all 1039 time steps, 0.05% of the grid. `ds` still holds the full dataset,
+  so the metadata/dimension report covers everything, and every report is stamped **PARTIAL AUDIT**
+  with the exact sampling used.
 
 ## Batch mode — one report per dataset folder
 
@@ -73,6 +81,8 @@ Run the notebook top to bottom (section 25 launches it automatically when the so
 python batch_audit.py                              # every source found next to the notebook
 python batch_audit.py --sources ENTSOE OWID        # only these sources
 python batch_audit.py --sources IRENASTAT --limit 2   # quick smoke test, 2 files per folder
+python batch_audit.py --skip-existing                # resume: skip folders already reported
+python batch_audit.py --max-file-mb 500              # skip anything bigger than 500 MB
 python batch_audit.py examples/sites               # the bundled demo tree
 ```
 
@@ -98,8 +108,11 @@ reports/
   layouts exist, which columns are missing from some years, which columns changed dtype between
   downloads), **problems that recur across files**, and each file's scorecard and final audit.
 - **`index.md` / `overview.md`** — dataset folders per source, and sources side by side.
-- A file whose audit errors does not stop the batch: the traceback stays in `report.html` and the file
-  is listed under "Files that did not run cleanly".
+- **Nothing stops the batch.** Files are audited one folder at a time, each in its own kernel process,
+  so memory is released after every file. A cell that raises keeps its traceback in `report.html`
+  ("Files that did not run cleanly"); a file that cannot be loaded at all — out of memory, dead
+  kernel, unreadable — is recorded under "Files that could not be audited at all" and the run
+  continues. Use `--skip-existing` to resume an interrupted run.
 
 Runtime is a few seconds per file plus load time (≈90 s for 70 small files), and reports run roughly
 0.5–0.7 MB of HTML per file. Set `RUN_BATCH = False` in the configuration cell to skip the batch while

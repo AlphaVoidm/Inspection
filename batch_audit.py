@@ -252,8 +252,10 @@ def write_dataset_report(title, results, out_dir: Path):
                          " during execution — the tracebacks are shown inline below.</div>")
         if summary:
             if summary.get("partial_read"):
-                parts.append("<div class='partial'><strong>Partial read</strong> — the file was too "
-                             f"large, so only the first {summary['rows']:,} rows were audited.</div>")
+                reason = summary.get("partial_reason") or f"only {summary['rows']:,} rows were read"
+                parts.append("<div class='partial'><strong>Partial audit</strong> — "
+                             f"{html.escape(str(reason))}. Every number below describes that "
+                             "sample, not the whole file.</div>")
             scorecard = "".join(
                 f"<tr><td style='text-align:left'>{html.escape(str(row['quality_dimension']))}</td>"
                 f"<td style='text-align:left'><span class='status-{html.escape(str(row['status']))}'>"
@@ -283,7 +285,12 @@ def write_dataset_report(title, results, out_dir: Path):
           "Full evidence (every cell output, tables and plots): `report.html`._", "",
           "## Files", "", markdown_table(file_rows(summaries))]
 
-    failed = [r for r in results if r["errors"]]
+    crashed = [r for r in results if r.get("failure")]
+    if crashed:
+        md += ["", "## Files that could not be audited at all", ""]
+        md += [f"- `{r['file'].name}`: {r['failure']}" for r in crashed]
+
+    failed = [r for r in results if r["errors"] and not r.get("failure")]
     if failed:
         md += ["", "## Files that did not run cleanly", ""]
         md += [f"- `{r['file'].name}`: {r['errors']} cell(s) raised an error "
@@ -291,9 +298,10 @@ def write_dataset_report(title, results, out_dir: Path):
 
     partial = [s for s in summaries if s.get("partial_read")]
     if partial:
-        md += ["", "## Partially read files", "",
-               "These were too large to read completely, so their audit describes only the first rows:"]
-        md += [f"- `{s['file']}`: first {s['rows']:,} rows of {s['file_size_mb']} MB" for s in partial]
+        md += ["", "## Partially audited files", "",
+               "These were too large to load completely, so their audit describes a sample only:"]
+        md += [f"- `{s['file']}` ({s['file_size_mb']} MB): "
+               f"{s.get('partial_reason') or str(s['rows']) + ' rows read'}" for s in partial]
 
     if summaries:
         md += ["", "## Schema comparison across the files of this folder", "",
@@ -404,6 +412,11 @@ def main():
     parser.add_argument("--timeout", type=int, default=1800, help="per-cell timeout in seconds")
     parser.add_argument("--dpi", type=int, default=70, help="plot resolution inside the reports")
     parser.add_argument("--limit", type=int, help="audit at most this many files per dataset folder")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="skip dataset folders that already have a report.html "
+                             "(resume an interrupted run)")
+    parser.add_argument("--max-file-mb", type=float,
+                        help="skip files larger than this many MB instead of auditing them")
     args = parser.parse_args()
 
     root = Path(args.root_opt or args.root).resolve()
@@ -419,6 +432,10 @@ def main():
         and not p.name.startswith("."))
 
     records = inventory_records(root, sources)
+    if args.max_file_mb:
+        for record in records:
+            if record["status"] == "audit" and record["size_mb"] > args.max_file_mb:
+                record["status"] = f"skipped: larger than --max-file-mb ({args.max_file_mb} MB)"
     if not records:
         sys.exit(f"No files found under {root} for sources: {', '.join(sources)}")
 
@@ -466,17 +483,35 @@ def main():
             label = source if dataset == "." else f"{source} / {dataset}"
             print(f"  [{label}]")
 
+            if args.skip_existing and (out_dir / "report.html").exists():
+                print("    already reported - skipped (--skip-existing)")
+                continue
+
             results = []
             for record in dataset_records:
                 data_file = Path(record["path"])
                 print(f"    - {data_file.name} ({record['size_mb']} MB) ... ", end="", flush=True)
                 summary_path = audits_dir / f"{safe_name(data_file.stem)}.json"
-                nb, errors = run_notebook(notebook_path, data_file, summary_path,
-                                          args.timeout, args.dpi)
+                try:
+                    nb, errors = run_notebook(notebook_path, data_file, summary_path,
+                                              args.timeout, args.dpi)
+                    body, _ = exporter.from_notebook_node(nb)
+                except Exception as exc:      # deliberately broad: keep the batch running
+                    # A file that cannot be audited at all (out of memory, dead kernel, unreadable)
+                    # is recorded as a failure and the batch moves on to the next one.
+                    message = f"{type(exc).__name__}: {exc}"
+                    print(f"FAILED - {message[:120]}")
+                    results.append({"file": data_file, "errors": 1, "summary": None,
+                                    "body": f"<div class='error'><strong>This file could not be "
+                                            f"audited.</strong><pre>{html.escape(message)}</pre></div>",
+                                    "failure": message})
+                    continue
                 summary = json.loads(summary_path.read_text()) if summary_path.exists() else None
-                body, _ = exporter.from_notebook_node(nb)
                 results.append({"file": data_file, "errors": errors, "summary": summary, "body": body})
                 print("done" if not errors else f"done ({errors} cell error(s))")
+
+            if not results:
+                continue
 
             write_dataset_report(label, results, out_dir)
             dataset_results[dataset] = (results, rel_dir)
